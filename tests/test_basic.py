@@ -21,6 +21,7 @@ def test_grouped():
     assert h["notes"][0]["text"] == "epigraph for the zine"  # note attached
     assert h["added"] == "2026-11-10T15:05:00"
     assert lib["some-scanned-manual"]["stats"]["highlights_without_text"] == 1
+    assert len(lib["Some Paper.pdf"]["highlights"]) == 2   # same page, different text: both kept
     assert len(d["unparsed"]) == 1                           # Spanish entry needs --llm
 
 

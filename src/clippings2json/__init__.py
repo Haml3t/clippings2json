@@ -10,7 +10,8 @@ What it does
   * splits the file on the ========== separators and parses each entry
     (title, author, highlight/note/bookmark, page, location, date, text)
   * drops stale highlights: editing a highlight on the Kindle appends a NEW
-    entry and keeps the old one; the latest overlapping highlight wins
+    entry and keeps the old one; when two highlights overlap in position AND
+    text, the latest wins (distinct highlights on the same page are kept)
   * attaches each note to the highlight it was typed on
   * gives every clipping a stable 12-char id (same input -> same id), so
     re-runs can be diffed / deduped downstream
@@ -23,6 +24,7 @@ ANTHROPIC_API_KEY set, those entries alone are sent to Claude (Haiku by
 default) to be structured; nothing else leaves your machine.
 """
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -31,7 +33,7 @@ import sys
 import urllib.request
 from datetime import datetime
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 SEP = "=========="
 META = re.compile(r"^-\s*Your (Highlight|Note|Bookmark|Clip(?:ping)?)\b(.*)$", re.I)
@@ -151,6 +153,25 @@ def _pos(c):
     return (p, e if e is not None else p) if p is not None else (None, None)
 
 
+def _norm(s):
+    return " ".join(s.lower().split())
+
+
+def _same_passage(a, b):
+    """True if b is an edited version of a: one contains the other, or they share
+    a run covering most of the shorter text (an edit that moved both ends).
+    Overlapping position alone is not enough: PDFs only give a page number, and
+    several separate highlights on one page are common."""
+    a, b = _norm(a), _norm(b)
+    if not a or not b:
+        return a == b
+    if a in b or b in a:
+        return True
+    sm = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    m = sm.find_longest_match(0, len(a), 0, len(b))
+    return m.size >= 0.6 * min(len(a), len(b))
+
+
 def _id(c):
     s, _ = _pos(c)
     raw = "%s|%s|%s|%s|%s" % (c["title"], c["author"], c["type"], s, c["text"])
@@ -179,8 +200,8 @@ def build(clips, keep_bookmarks=False):
             s, e = _pos(h)
             for i, o in enumerate(kept):
                 os_, oe = _pos(o)
-                same = (s is not None and os_ is not None and s <= oe and os_ <= e) or \
-                       (s is None and h["text"] == o["text"])
+                near = s is not None and os_ is not None and s <= oe and os_ <= e
+                same = (near or s is None) and _same_passage(h["text"], o["text"])
                 if same:
                     superseded += 1
                     if (h["added"] or "") >= (o["added"] or ""):
